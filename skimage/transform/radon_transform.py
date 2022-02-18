@@ -65,7 +65,7 @@ def radon(image, theta=None, circle=True, *, preserve_range=False):
 
     if circle:
         shape_min = min(image.shape)
-        radius = shape_min // 2
+        radius = (shape_min-1) / 2.0
         img_shape = np.array(image.shape)
         coords = np.array(np.ogrid[:image.shape[0], :image.shape[1]],
                           dtype=object)
@@ -93,7 +93,8 @@ def radon(image, theta=None, circle=True, *, preserve_range=False):
     # padded_image is always square
     if padded_image.shape[0] != padded_image.shape[1]:
         raise ValueError('padded_image must be a square')
-    center = padded_image.shape[0] // 2
+    #center = padded_image.shape[0] // 2
+    center = (padded_image.shape[0]-1) / 2.0
     radon_image = np.zeros((padded_image.shape[0], len(theta)),
                            dtype=image.dtype)
 
@@ -284,9 +285,12 @@ def iradon(radon_image, theta=None, output_size=None,
     # Reconstruct image by interpolation
     reconstructed = np.zeros((output_size, output_size),
                              dtype=dtype)
-    radius = output_size // 2
+    #radius = output_size // 2
+    radius = (output_size-1)/  2.0
     xpr, ypr = np.mgrid[:output_size, :output_size] - radius
-    x = np.arange(img_shape) - img_shape // 2
+    #x = np.arange(img_shape) - img_shape // 2
+    mid_index = (radon_image.shape[0]-1) /2.0
+    x = np.arange(radon_filtered.shape[0]) - mid_index 
 
     for col, angle in zip(radon_filtered.T, np.deg2rad(theta)):
         t = ypr * np.cos(angle) - xpr * np.sin(angle)
