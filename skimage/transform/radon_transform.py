@@ -307,6 +307,7 @@ def iradon(radon_image, theta=None, output_size=None,
         reconstructed += interpolant(t)
         if return_sbp:
             sbp[sbp_ind]=interpolant(t)
+            sbp_ind+=1
 
     if circle:
         out_reconstruction_circle = (xpr ** 2 + ypr ** 2) > radius ** 2
