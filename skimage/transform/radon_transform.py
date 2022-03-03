@@ -176,7 +176,7 @@ def _get_fourier_filter(size, filter_name):
 
 def iradon(radon_image, theta=None, output_size=None,
            filter_name="ramp", interpolation="linear", circle=True,
-           preserve_range=True):
+           preserve_range=True, return_sbp=False):
     """Inverse radon transform.
 
     Reconstruct an image from the radon transform, using the filtered
@@ -292,6 +292,11 @@ def iradon(radon_image, theta=None, output_size=None,
     mid_index = (radon_image.shape[0]-1) /2.0
     x = np.arange(radon_filtered.shape[0]) - mid_index 
 
+    if return_sbp:
+        sbp=np.zeros((angles_count,output_size, output_size),
+                             dtype=dtype)
+        sbp_ind = 0
+
     for col, angle in zip(radon_filtered.T, np.deg2rad(theta)):
         t = ypr * np.cos(angle) - xpr * np.sin(angle)
         if interpolation == 'linear':
@@ -300,12 +305,19 @@ def iradon(radon_image, theta=None, output_size=None,
             interpolant = interp1d(x, col, kind=interpolation,
                                    bounds_error=False, fill_value=0)
         reconstructed += interpolant(t)
+        if return_sbp:
+            sbp[sbp_ind]=interpolant(t)
 
     if circle:
         out_reconstruction_circle = (xpr ** 2 + ypr ** 2) > radius ** 2
         reconstructed[out_reconstruction_circle] = 0.
-
-    return reconstructed * np.pi / (2 * angles_count)
+        if return_sbp:
+            sbp[:,out_reconstruction_circle]=0.
+            
+    if return_sbp:
+        return reconstructed * np.pi / (2 * angles_count), sbp* np.pi / 2
+    else:
+        return reconstructed * np.pi / (2 * angles_count)
 
 
 def order_angles_golden_ratio(theta):
