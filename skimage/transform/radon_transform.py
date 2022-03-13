@@ -115,7 +115,7 @@ def _sinogram_circle_to_square(sinogram):
     new_center = diagonal // 2
     pad_before = new_center - old_center
     pad_width = ((pad_before, pad - pad_before), (0, 0))
-    return np.pad(sinogram, pad_width, mode='constant', constant_values=0)
+    return np.pad(sinogram, pad_width, mode='constant', constant_values=0),pad_before
 
 
 def _get_fourier_filter(size, filter_name):
@@ -268,7 +268,7 @@ def iradon(radon_image, theta=None, output_size=None,
             output_size = int(np.floor(np.sqrt((img_shape) ** 2 / 2.0)))
 
     if circle:
-        radon_image = _sinogram_circle_to_square(radon_image)
+        radon_image, pad_before = _sinogram_circle_to_square(radon_image)
         img_shape = radon_image.shape[0]
 
     # Resize image to next power of two (but no less than 64) for
@@ -289,7 +289,9 @@ def iradon(radon_image, theta=None, output_size=None,
     radius = (output_size-1)/  2.0
     xpr, ypr = np.mgrid[:output_size, :output_size] - radius
     #x = np.arange(img_shape) - img_shape // 2
-    mid_index = (radon_image.shape[0]-1) /2.0
+    mid_index = (output_size-1) /2.0+pad_before
+    print(mid_index)
+    print(radon_image.shape)
     x = np.arange(radon_filtered.shape[0]) - mid_index 
 
     if return_sbp:
