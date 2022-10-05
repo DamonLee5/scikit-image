@@ -118,7 +118,7 @@ def _sinogram_circle_to_square(sinogram):
     return np.pad(sinogram, pad_width, mode='constant', constant_values=0),pad_before
 
 
-def _get_fourier_filter(size, filter_name):
+def _get_fourier_filter(size, filter_name, lowpass_filter=None):
     """Construct the Fourier filter.
 
     This computation lessens artifacts and removes a small bias as
@@ -155,7 +155,8 @@ def _get_fourier_filter(size, filter_name):
     # small bias as explained in [1], Chap 3. Equation 61
     fourier_filter = 2 * np.real(fft(f))         # ramp filter
     if filter_name == "ramp":
-        pass
+        if lowpass_filter is not None:
+            fourier_filter *= fftshift(lowpass_filter)
     elif filter_name == "shepp-logan":
         # Start from first element to avoid divide by zero
         omega = np.pi * fftfreq(size)[1:]
@@ -176,7 +177,7 @@ def _get_fourier_filter(size, filter_name):
 
 def iradon(radon_image, theta=None, output_size=None,
            filter_name="ramp", interpolation="linear", circle=True,
-           preserve_range=True, return_sbp=False):
+           preserve_range=True, return_sbp=False, lowpass_filter=None):
     """Inverse radon transform.
 
     Reconstruct an image from the radon transform, using the filtered
@@ -278,7 +279,7 @@ def iradon(radon_image, theta=None, output_size=None,
     img = np.pad(radon_image, pad_width, mode='constant', constant_values=0)
 
     # Apply filter in Fourier domain
-    fourier_filter = _get_fourier_filter(projection_size_padded, filter_name)
+    fourier_filter = _get_fourier_filter(projection_size_padded, filter_name, lowpass_filter)
     projection = fft(img, axis=0) * fourier_filter
     radon_filtered = np.real(ifft(projection, axis=0)[:img_shape, :])
 
