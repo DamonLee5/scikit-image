@@ -20,10 +20,10 @@ def radon(image, theta=None, circle=True, *, preserve_range=False):
 
     Parameters
     ----------
-    image : ndarray
+    image : array_like
         Input image. The rotation axis will be located in the pixel with
         indices ``(image.shape[0] // 2, image.shape[1] // 2)``.
-    theta : array, optional
+    theta : array_like, optional
         Projection angles (in degrees). If `None`, the value is set to
         np.arange(180).
     circle : boolean, optional
@@ -65,25 +65,20 @@ def radon(image, theta=None, circle=True, *, preserve_range=False):
 
     if circle:
         shape_min = min(image.shape)
-        radius = shape_min // 2
+        radius = (shape_min-1) / 2.0
         img_shape = np.array(image.shape)
-        coords = np.array(np.ogrid[: image.shape[0], : image.shape[1]], dtype=object)
+        coords = np.array(np.ogrid[:image.shape[0], :image.shape[1]],
+                          dtype=object)
         dist = ((coords - img_shape // 2) ** 2).sum(0)
-        outside_reconstruction_circle = dist > radius**2
+        outside_reconstruction_circle = dist > radius ** 2
         if np.any(image[outside_reconstruction_circle]):
-            warn(
-                'Radon transform: image must be zero outside the '
-                'reconstruction circle'
-            )
+            warn('Radon transform: image must be zero outside the '
+                 'reconstruction circle')
         # Crop image to make it square
-        slices = tuple(
-            (
-                slice(int(np.ceil(excess / 2)), int(np.ceil(excess / 2) + shape_min))
-                if excess > 0
-                else slice(None)
-            )
-            for excess in (img_shape - shape_min)
-        )
+        slices = tuple(slice(int(np.ceil(excess / 2)),
+                             int(np.ceil(excess / 2) + shape_min))
+                       if excess > 0 else slice(None)
+                       for excess in (img_shape - shape_min))
         padded_image = image[slices]
     else:
         diagonal = np.sqrt(2) * max(image.shape)
@@ -92,23 +87,22 @@ def radon(image, theta=None, circle=True, *, preserve_range=False):
         old_center = [s // 2 for s in image.shape]
         pad_before = [nc - oc for oc, nc in zip(old_center, new_center)]
         pad_width = [(pb, p - pb) for pb, p in zip(pad_before, pad)]
-        padded_image = np.pad(image, pad_width, mode='constant', constant_values=0)
+        padded_image = np.pad(image, pad_width, mode='constant',
+                              constant_values=0)
 
     # padded_image is always square
     if padded_image.shape[0] != padded_image.shape[1]:
         raise ValueError('padded_image must be a square')
-    center = padded_image.shape[0] // 2
-    radon_image = np.zeros((padded_image.shape[0], len(theta)), dtype=image.dtype)
+    #center = padded_image.shape[0] // 2
+    center = (padded_image.shape[0]-1) / 2.0
+    radon_image = np.zeros((padded_image.shape[0], len(theta)),
+                           dtype=image.dtype)
 
     for i, angle in enumerate(np.deg2rad(theta)):
         cos_a, sin_a = np.cos(angle), np.sin(angle)
-        R = np.array(
-            [
-                [cos_a, sin_a, -center * (cos_a + sin_a - 1)],
-                [-sin_a, cos_a, -center * (cos_a - sin_a - 1)],
-                [0, 0, 1],
-            ]
-        )
+        R = np.array([[cos_a, sin_a, -center * (cos_a + sin_a - 1)],
+                      [-sin_a, cos_a, -center * (cos_a - sin_a - 1)],
+                      [0, 0, 1]])
         rotated = warp(padded_image, R, clip=False)
         radon_image[:, i] = rotated.sum(0)
     return radon_image
@@ -121,10 +115,10 @@ def _sinogram_circle_to_square(sinogram):
     new_center = diagonal // 2
     pad_before = new_center - old_center
     pad_width = ((pad_before, pad - pad_before), (0, 0))
-    return np.pad(sinogram, pad_width, mode='constant', constant_values=0)
+    return np.pad(sinogram, pad_width, mode='constant', constant_values=0),pad_before
 
 
-def _get_fourier_filter(size, filter_name):
+def _get_fourier_filter(size, filter_name, lowpass_filter=None):
     """Construct the Fourier filter.
 
     This computation lessens artifacts and removes a small bias as
@@ -150,12 +144,8 @@ def _get_fourier_filter(size, filter_name):
            Imaging", IEEE Press 1988.
 
     """
-    n = np.concatenate(
-        (
-            np.arange(1, size / 2 + 1, 2, dtype=int),
-            np.arange(size / 2 - 1, 0, -2, dtype=int),
-        )
-    )
+    n = np.concatenate((np.arange(1, size / 2 + 1, 2, dtype=int),
+                        np.arange(size / 2 - 1, 0, -2, dtype=int)))
     f = np.zeros(size)
     f[0] = 0.25
     f[1::2] = -1 / (np.pi * n) ** 2
@@ -163,9 +153,10 @@ def _get_fourier_filter(size, filter_name):
     # Computing the ramp filter from the fourier transform of its
     # frequency domain representation lessens artifacts and removes a
     # small bias as explained in [1], Chap 3. Equation 61
-    fourier_filter = 2 * np.real(fft(f))  # ramp filter
+    fourier_filter = 2 * np.real(fft(f))         # ramp filter
     if filter_name == "ramp":
-        pass
+        if lowpass_filter is not None:
+            fourier_filter *= fftshift(lowpass_filter)
     elif filter_name == "shepp-logan":
         # Start from first element to avoid divide by zero
         omega = np.pi * fftfreq(size)[1:]
@@ -184,15 +175,9 @@ def _get_fourier_filter(size, filter_name):
     return fourier_filter[:, np.newaxis]
 
 
-def iradon(
-    radon_image,
-    theta=None,
-    output_size=None,
-    filter_name="ramp",
-    interpolation="linear",
-    circle=True,
-    preserve_range=True,
-):
+def iradon(radon_image, theta=None, output_size=None,
+           filter_name="ramp", interpolation="linear", circle=True,
+           preserve_range=True, return_sbp=False, lowpass_filter=None):
     """Inverse radon transform.
 
     Reconstruct an image from the radon transform, using the filtered
@@ -200,13 +185,13 @@ def iradon(
 
     Parameters
     ----------
-    radon_image : ndarray
+    radon_image : array
         Image containing radon transform (sinogram). Each column of
         the image corresponds to a projection along a different
         angle. The tomography rotation axis should lie at the pixel
         index ``radon_image.shape[0] // 2`` along the 0th dimension of
         ``radon_image``.
-    theta : array, optional
+    theta : array_like, optional
         Reconstruction angles (in degrees). Default: m angles evenly spaced
         between 0 and 180 (if the shape of `radon_image` is (N, M)).
     output_size : int, optional
@@ -261,18 +246,16 @@ def iradon(
 
     angles_count = len(theta)
     if angles_count != radon_image.shape[1]:
-        raise ValueError(
-            "The given ``theta`` does not match the number of "
-            "projections in ``radon_image``."
-        )
+        raise ValueError("The given ``theta`` does not match the number of "
+                         "projections in ``radon_image``.")
 
     interpolation_types = ('linear', 'nearest', 'cubic')
     if interpolation not in interpolation_types:
-        raise ValueError(f"Unknown interpolation: {interpolation}")
+        raise ValueError("Unknown interpolation: %s" % interpolation)
 
     filter_types = ('ramp', 'shepp-logan', 'cosine', 'hamming', 'hann', None)
     if filter_name not in filter_types:
-        raise ValueError(f"Unknown filter: {filter_name}")
+        raise ValueError("Unknown filter: %s" % filter_name)
 
     radon_image = convert_to_float(radon_image, preserve_range)
     dtype = radon_image.dtype
@@ -286,7 +269,7 @@ def iradon(
             output_size = int(np.floor(np.sqrt((img_shape) ** 2 / 2.0)))
 
     if circle:
-        radon_image = _sinogram_circle_to_square(radon_image)
+        radon_image, pad_before = _sinogram_circle_to_square(radon_image)
         img_shape = radon_image.shape[0]
 
     # Resize image to next power of two (but no less than 64) for
@@ -296,31 +279,49 @@ def iradon(
     img = np.pad(radon_image, pad_width, mode='constant', constant_values=0)
 
     # Apply filter in Fourier domain
-    fourier_filter = _get_fourier_filter(projection_size_padded, filter_name)
+    fourier_filter = _get_fourier_filter(projection_size_padded, filter_name, lowpass_filter)
     projection = fft(img, axis=0) * fourier_filter
     radon_filtered = np.real(ifft(projection, axis=0)[:img_shape, :])
 
     # Reconstruct image by interpolation
-    reconstructed = np.zeros((output_size, output_size), dtype=dtype)
-    radius = output_size // 2
+    reconstructed = np.zeros((output_size, output_size),
+                             dtype=dtype)
+    #radius = output_size // 2
+    radius = (output_size-1)/  2.0
     xpr, ypr = np.mgrid[:output_size, :output_size] - radius
-    x = np.arange(img_shape) - img_shape // 2
+    #x = np.arange(img_shape) - img_shape // 2
+    mid_index = (output_size-1) /2.0+pad_before
+    print(mid_index)
+    print(radon_image.shape)
+    x = np.arange(radon_filtered.shape[0]) - mid_index 
+
+    if return_sbp:
+        sbp=np.zeros((angles_count,output_size, output_size),
+                             dtype=dtype)
+        sbp_ind = 0
 
     for col, angle in zip(radon_filtered.T, np.deg2rad(theta)):
         t = ypr * np.cos(angle) - xpr * np.sin(angle)
         if interpolation == 'linear':
             interpolant = partial(np.interp, xp=x, fp=col, left=0, right=0)
         else:
-            interpolant = interp1d(
-                x, col, kind=interpolation, bounds_error=False, fill_value=0
-            )
+            interpolant = interp1d(x, col, kind=interpolation,
+                                   bounds_error=False, fill_value=0)
         reconstructed += interpolant(t)
+        if return_sbp:
+            sbp[sbp_ind]=interpolant(t)
+            sbp_ind+=1
 
     if circle:
-        out_reconstruction_circle = (xpr**2 + ypr**2) > radius**2
-        reconstructed[out_reconstruction_circle] = 0.0
-
-    return reconstructed * np.pi / (2 * angles_count)
+        out_reconstruction_circle = (xpr ** 2 + ypr ** 2) > radius ** 2
+        reconstructed[out_reconstruction_circle] = 0.
+        if return_sbp:
+            sbp[:,out_reconstruction_circle]=0.
+            
+    if return_sbp:
+        return reconstructed * np.pi / (2 * angles_count), sbp* np.pi / 2
+    else:
+        return reconstructed * np.pi / (2 * angles_count)
 
 
 def order_angles_golden_ratio(theta):
@@ -329,7 +330,7 @@ def order_angles_golden_ratio(theta):
 
     Parameters
     ----------
-    theta : array of floats, shape (M,)
+    theta : 1D array of floats
         Projection angles in degrees. Duplicate angles are not allowed.
 
     Returns
@@ -357,12 +358,12 @@ def order_angles_golden_ratio(theta):
     """
     interval = 180
 
-    remaining_indices = list(np.argsort(theta))  # indices into theta
+    remaining_indices = list(np.argsort(theta))   # indices into theta
     # yield an arbitrary angle to start things off
     angle = theta[remaining_indices[0]]
     yield remaining_indices.pop(0)
     # determine subsequent angles using the golden ratio method
-    angle_increment = interval / golden_ratio**2
+    angle_increment = interval / golden_ratio ** 2
     while remaining_indices:
         remaining_angles = theta[remaining_indices]
         angle = (angle + angle_increment) % interval
@@ -382,15 +383,8 @@ def order_angles_golden_ratio(theta):
             yield remaining_indices.pop(index_above)
 
 
-def iradon_sart(
-    radon_image,
-    theta=None,
-    image=None,
-    projection_shifts=None,
-    clip=None,
-    relaxation=0.15,
-    dtype=None,
-):
+def iradon_sart(radon_image, theta=None, image=None, projection_shifts=None,
+                clip=None, relaxation=0.15, dtype=None):
     """Inverse radon transform.
 
     Reconstruct an image from the radon transform, using a single iteration of
@@ -398,18 +392,20 @@ def iradon_sart(
 
     Parameters
     ----------
-    radon_image : ndarray, shape (M, N)
+    radon_image : 2D array
         Image containing radon transform (sinogram). Each column of
         the image corresponds to a projection along a different angle. The
         tomography rotation axis should lie at the pixel index
         ``radon_image.shape[0] // 2`` along the 0th dimension of
         ``radon_image``.
-    theta : array, shape (N,), optional
+    theta : 1D array, optional
         Reconstruction angles (in degrees). Default: m angles evenly spaced
         between 0 and 180 (if the shape of `radon_image` is (N, M)).
-    image : ndarray, shape (M, M), optional
-        Image containing an initial reconstruction estimate. Default is an array of zeros.
-    projection_shifts : array, shape (N,), optional
+    image : 2D array, optional
+        Image containing an initial reconstruction estimate. Shape of this
+        array should be ``(radon_image.shape[0], radon_image.shape[0])``. The
+        default is an array of zeros.
+    projection_shifts : 1D array, optional
         Shift the projections contained in ``radon_image`` (the sinogram) by
         this many pixels before reconstructing the image. The i'th value
         defines the shift of the i'th column of ``radon_image``.
@@ -471,16 +467,13 @@ def iradon_sart(
         if radon_image.dtype.char in 'fd':
             dtype = radon_image.dtype
         else:
-            warn(
-                "Only floating point data type are valid for SART inverse "
-                "radon transform. Input data is cast to float. To disable "
-                "this warning, please cast image_radon to float."
-            )
+            warn("Only floating point data type are valid for SART inverse "
+                 "radon transform. Input data is cast to float. To disable "
+                 "this warning, please cast image_radon to float.")
             dtype = np.dtype(float)
     elif np.dtype(dtype).char not in 'fd':
-        raise ValueError(
-            "Only floating point data type are valid for inverse " "radon transform."
-        )
+        raise ValueError("Only floating point data type are valid for inverse "
+                         "radon transform.")
 
     dtype = np.dtype(dtype)
     radon_image = radon_image.astype(dtype, copy=False)
@@ -488,34 +481,33 @@ def iradon_sart(
     reconstructed_shape = (radon_image.shape[0], radon_image.shape[0])
 
     if theta is None:
-        theta = np.linspace(0, 180, radon_image.shape[1], endpoint=False, dtype=dtype)
+        theta = np.linspace(0, 180, radon_image.shape[1],
+                            endpoint=False, dtype=dtype)
     elif len(theta) != radon_image.shape[1]:
-        raise ValueError(
-            f'Shape of theta ({len(theta)}) does not match the '
-            f'number of projections ({radon_image.shape[1]})'
-        )
+        raise ValueError('Shape of theta (%s) does not match the '
+                         'number of projections (%d)'
+                         % (len(theta), radon_image.shape[1]))
     else:
         theta = np.asarray(theta, dtype=dtype)
 
     if image is None:
         image = np.zeros(reconstructed_shape, dtype=dtype)
     elif image.shape != reconstructed_shape:
-        raise ValueError(
-            f'Shape of image ({image.shape}) does not match first dimension '
-            f'of radon_image ({reconstructed_shape})'
-        )
+        raise ValueError('Shape of image (%s) does not match first dimension '
+                         'of radon_image (%s)'
+                         % (image.shape, reconstructed_shape))
     elif image.dtype != dtype:
-        warn(f'image dtype does not match output dtype: ' f'image is cast to {dtype}')
+        warn(f'image dtype does not match output dtype: '
+             f'image is cast to {dtype}')
 
     image = np.asarray(image, dtype=dtype)
 
     if projection_shifts is None:
         projection_shifts = np.zeros((radon_image.shape[1],), dtype=dtype)
     elif len(projection_shifts) != radon_image.shape[1]:
-        raise ValueError(
-            f'Shape of projection_shifts ({len(projection_shifts)}) does not match the '
-            f'number of projections ({radon_image.shape[1]})'
-        )
+        raise ValueError('Shape of projection_shifts (%s) does not match the '
+                         'number of projections (%d)'
+                         % (len(projection_shifts), radon_image.shape[1]))
     else:
         projection_shifts = np.asarray(projection_shifts, dtype=dtype)
     if clip is not None:
@@ -524,12 +516,9 @@ def iradon_sart(
         clip = np.asarray(clip, dtype=dtype)
 
     for angle_index in order_angles_golden_ratio(theta):
-        image_update = sart_projection_update(
-            image,
-            theta[angle_index],
-            radon_image[:, angle_index],
-            projection_shifts[angle_index],
-        )
+        image_update = sart_projection_update(image, theta[angle_index],
+                                              radon_image[:, angle_index],
+                                              projection_shifts[angle_index])
         image += relaxation * image_update
         if clip is not None:
             image = np.clip(image, clip[0], clip[1])
